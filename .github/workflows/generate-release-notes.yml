@@ -3,6 +3,8 @@ name: Generate Release Notes
 on:
   release:
     types: [published]
+  repository_dispatch:
+    types: [komari-web-release-published]
   workflow_dispatch:
     inputs:
       tag:
@@ -32,7 +34,7 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
-            const webRepo = { owner: "komari-monitor", repo: "komari-web" };
+            const webRepo = { owner: "bi11zh3nn", repo: "komari-web" };
 
             const AI_CONTEXT_CHAR_LIMIT = 120000;
             const AI_MAX_COMMITS = 160;
