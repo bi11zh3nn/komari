@@ -69,6 +69,7 @@ func handleV2RPC(uuid string, req v2.Request, allowWait bool) v2.Response {
 		if err := ingestBasicInfo(uuid, params.Info, ""); err != nil {
 			return v2.Error(req.ID, -32000, "failed to save basic info", err.Error())
 		}
+		agent_runtime.SetV2Capabilities(uuid, params.Capabilities)
 		return v2.Success(req.ID, gin.H{"status": "success"})
 	case v2.MethodAgentPingResult:
 		var params v2.PingResultParams
@@ -99,6 +100,7 @@ func handleV2RPC(uuid string, req v2.Request, allowWait bool) v2.Response {
 		}
 		refreshPostPresence(uuid)
 		agent_runtime.MarkV2Client(uuid)
+		agent_runtime.SetV2Capabilities(uuid, params.Capabilities)
 		timeout := 0 * time.Second
 		if allowWait {
 			timeout = 25 * time.Second

@@ -23,7 +23,7 @@ func SwitchAgentVersion(uuid, version string) error {
 	if !slices.Contains(GetAllOnlineUUIDs(), uuid) {
 		return ErrSwitchVersionOffline
 	}
-	if !IsV2Client(uuid) {
+	if !SupportsV2Capability(uuid, "switch_version") {
 		return ErrSwitchVersionUnsupported
 	}
 	if !DispatchV2Event(uuid, v2.MethodAgentSwitchVersion, v2.SwitchVersionParams{Version: version}) {

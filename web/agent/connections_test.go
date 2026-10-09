@@ -49,3 +49,20 @@ func TestRecordReportKeepsLatestAndShortRecentWindow(t *testing.T) {
 		t.Fatal("deleting latest report did not clear runtime report state")
 	}
 }
+
+func TestV2Capabilities(t *testing.T) {
+	const uuid = "capability-node"
+	t.Cleanup(func() { DeleteConnectedClients(uuid) })
+
+	SetV2Capabilities(uuid, []string{" exec ", "switch_version", ""})
+	if !SupportsV2Capability(uuid, "exec") || !SupportsV2Capability(uuid, "switch_version") {
+		t.Fatal("reported capabilities were not stored")
+	}
+	if SupportsV2Capability(uuid, "startup_config") {
+		t.Fatal("unreported capability was accepted")
+	}
+	SetV2Capabilities(uuid, nil)
+	if SupportsV2Capability(uuid, "switch_version") {
+		t.Fatal("empty capability report did not clear stale state")
+	}
+}

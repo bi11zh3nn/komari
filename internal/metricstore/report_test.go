@@ -240,6 +240,74 @@ func TestReportBatchRetryDoesNotCountHistoricalTraffic(t *testing.T) {
 	}
 }
 
+func TestFailedFlushDoesNotDrainBoundedQueues(t *testing.T) {
+	t.Run("reports", func(t *testing.T) {
+		base := time.Now().UTC().Truncate(time.Second)
+		pending := []v2.Report{{UUID: "pending", UpdatedAt: base}}
+		queue := make(chan v2.Report, 2)
+		queue <- v2.Report{UUID: "queued-1", UpdatedAt: base.Add(time.Second)}
+		queue <- v2.Report{UUID: "queued-2", UpdatedAt: base.Add(2 * time.Second)}
+		fail := true
+		write := func(_ context.Context, values *[]v2.Report) error {
+			if fail {
+				return errors.New("injected report failure")
+			}
+			*values = nil
+			return nil
+		}
+
+		for attempt := 0; attempt < 2; attempt++ {
+			if err := flushReportQueueWithWriter(context.Background(), &pending, queue, write); err == nil {
+				t.Fatal("expected injected report write failure")
+			}
+			if len(pending) != 1 || len(queue) != 2 {
+				t.Fatalf("failed flush grew pending or drained queue: pending=%d queued=%d", len(pending), len(queue))
+			}
+		}
+
+		fail = false
+		if err := flushReportQueueWithWriter(context.Background(), &pending, queue, write); err != nil {
+			t.Fatalf("report recovery flush failed: %v", err)
+		}
+		if len(pending) != 0 || len(queue) != 0 {
+			t.Fatalf("report recovery left data: pending=%d queued=%d", len(pending), len(queue))
+		}
+	})
+
+	t.Run("pings", func(t *testing.T) {
+		base := time.Now().UTC().Truncate(time.Second)
+		pending := []models.PingRecord{{Client: "pending", TaskId: 1, Time: base, Value: 10}}
+		queue := make(chan models.PingRecord, 2)
+		queue <- models.PingRecord{Client: "queued-1", TaskId: 1, Time: base.Add(time.Second), Value: 20}
+		queue <- models.PingRecord{Client: "queued-2", TaskId: 1, Time: base.Add(2 * time.Second), Value: 30}
+		fail := true
+		write := func(_ context.Context, values *[]models.PingRecord) error {
+			if fail {
+				return errors.New("injected ping failure")
+			}
+			*values = nil
+			return nil
+		}
+
+		for attempt := 0; attempt < 2; attempt++ {
+			if err := flushPingQueueWithWriter(context.Background(), &pending, queue, write); err == nil {
+				t.Fatal("expected injected ping write failure")
+			}
+			if len(pending) != 1 || len(queue) != 2 {
+				t.Fatalf("failed flush grew pending or drained queue: pending=%d queued=%d", len(pending), len(queue))
+			}
+		}
+
+		fail = false
+		if err := flushPingQueueWithWriter(context.Background(), &pending, queue, write); err != nil {
+			t.Fatalf("ping recovery flush failed: %v", err)
+		}
+		if len(pending) != 0 || len(queue) != 0 {
+			t.Fatalf("ping recovery left data: pending=%d queued=%d", len(pending), len(queue))
+		}
+	})
+}
+
 func TestWriteReportStoresMinuteMetricsAndResetAwareTraffic(t *testing.T) {
 	ctx := context.Background()
 	policy := defaultRollupPolicy()

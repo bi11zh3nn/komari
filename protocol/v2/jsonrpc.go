@@ -136,7 +136,8 @@ type ConnectionsReport struct {
 }
 
 type BasicInfoParams struct {
-	Info map[string]interface{} `json:"info"`
+	Info         map[string]interface{} `json:"info"`
+	Capabilities []string               `json:"capabilities,omitempty"`
 }
 
 type PingResultParams struct {

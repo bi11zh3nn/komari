@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/komari-monitor/komari/database/auditlog"
 	"github.com/komari-monitor/komari/pkg/rpc"
 	agent_runtime "github.com/komari-monitor/komari/web/agent"
 )
@@ -29,6 +30,7 @@ func init() {
 		Example: map[string]any{"uuid": "agent-uuid", "version": "1.2.*"},
 	})
 	rpc.MarkSensitive("admin:getAgentStartupConfig")
+	rpc.MarkSensitive("admin:switchAgentVersion")
 }
 
 func adminGetAgentStartupConfig(ctx context.Context, req *rpc.JsonRpcRequest) (any, *rpc.JsonRpcError) {
@@ -53,7 +55,7 @@ func adminGetAgentStartupConfig(ctx context.Context, req *rpc.JsonRpcRequest) (a
 	}
 }
 
-func adminSwitchAgentVersion(_ context.Context, req *rpc.JsonRpcRequest) (any, *rpc.JsonRpcError) {
+func adminSwitchAgentVersion(ctx context.Context, req *rpc.JsonRpcRequest) (any, *rpc.JsonRpcError) {
 	var params struct {
 		UUID    string `json:"uuid"`
 		Version string `json:"version"`
@@ -61,7 +63,9 @@ func adminSwitchAgentVersion(_ context.Context, req *rpc.JsonRpcRequest) (any, *
 	if err := req.BindParams(&params); err != nil {
 		return nil, rpc.MakeError(rpc.InvalidParams, "uuid and version are required", nil)
 	}
-	if strings.TrimSpace(params.UUID) == "" || strings.TrimSpace(params.Version) == "" {
+	params.UUID = strings.TrimSpace(params.UUID)
+	params.Version = strings.TrimSpace(params.Version)
+	if params.UUID == "" || params.Version == "" {
 		return nil, rpc.MakeError(rpc.InvalidParams, "uuid and version are required", nil)
 	}
 	if err := agent_runtime.SwitchAgentVersion(params.UUID, params.Version); err != nil {
@@ -76,5 +80,7 @@ func adminSwitchAgentVersion(_ context.Context, req *rpc.JsonRpcRequest) (any, *
 			return nil, rpc.MakeError(rpc.InternalError, "failed to dispatch agent version switch", nil)
 		}
 	}
+	actor, ip := auditActor(ctx)
+	auditlog.Log(ip, actor, "switch agent version: "+params.UUID+" -> "+params.Version, "warn")
 	return map[string]any{"queued": true}, nil
 }

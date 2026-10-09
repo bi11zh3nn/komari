@@ -2,6 +2,7 @@ package agent
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 var (
 	connectedClients = make(map[string]*connection.SafeConn)
 	v2Clients        = make(map[string]struct{})
+	v2Capabilities   = make(map[string]map[string]struct{})
 	latestReport     = make(map[string]*v2.Report)
 	recentReports    = make(map[string][]v2.Report)
 	// presenceOnly stores online state for non-WebSocket agents.
@@ -54,6 +56,30 @@ func IsV2Client(uuid string) bool {
 	return ok
 }
 
+func SetV2Capabilities(uuid string, capabilities []string) {
+	values := make(map[string]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		capability = strings.TrimSpace(capability)
+		if capability != "" {
+			values[capability] = struct{}{}
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(values) == 0 {
+		delete(v2Capabilities, uuid)
+		return
+	}
+	v2Capabilities[uuid] = values
+}
+
+func SupportsV2Capability(uuid, capability string) bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	_, ok := v2Capabilities[uuid][capability]
+	return ok
+}
+
 func DeleteClientConditionally(uuid string, connToRemove *connection.SafeConn) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -62,6 +88,7 @@ func DeleteClientConditionally(uuid string, connToRemove *connection.SafeConn) {
 	if currentConn, exists := connectedClients[uuid]; exists && currentConn == connToRemove {
 		delete(connectedClients, uuid)
 		delete(v2Clients, uuid)
+		delete(v2Capabilities, uuid)
 	}
 }
 func DeleteConnectedClients(uuid string) {
@@ -70,6 +97,7 @@ func DeleteConnectedClients(uuid string) {
 	// 只从 map 中删除，不再负责关闭连接
 	delete(connectedClients, uuid)
 	delete(v2Clients, uuid)
+	delete(v2Capabilities, uuid)
 }
 
 // SetPresence sets or clears presence for non-WebSocket agents.

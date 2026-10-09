@@ -212,11 +212,9 @@ func (w *reportBatchWorker) run() {
 	for {
 		select {
 		case request := <-w.requests:
-			pending = append(pending, drainReportQueue(w.queue, reportBatchQueueSize)...)
-			pendingPings = append(pendingPings, drainPingQueue(w.pingQueue, reportBatchQueueSize)...)
 			err := errors.Join(
-				writePendingReports(request.ctx, &pending),
-				writePendingPingRecords(request.ctx, &pendingPings),
+				flushReportQueue(request.ctx, &pending, w.queue),
+				flushPingQueue(request.ctx, &pendingPings, w.pingQueue),
 			)
 			if request.stop {
 				if err != nil {
@@ -228,12 +226,10 @@ func (w *reportBatchWorker) run() {
 			}
 			request.done <- err
 		case <-ticker.C:
-			pendingPings = append(pendingPings, drainPingQueue(w.pingQueue, reportBatchQueueSize)...)
-			if err := writePendingPingRecords(context.Background(), &pendingPings); err != nil {
+			if err := flushPingQueue(context.Background(), &pendingPings, w.pingQueue); err != nil {
 				logger.Errorf("metricstore", "failed to flush ping batch: %v", err)
 			}
-			pending = append(pending, drainReportQueue(w.queue, reportBatchQueueSize)...)
-			if err := writePendingReports(context.Background(), &pending); err != nil {
+			if err := flushReportQueue(context.Background(), &pending, w.queue); err != nil {
 				logger.Errorf("metricstore", "failed to flush metric report batch: %v", err)
 			}
 		}
@@ -301,6 +297,30 @@ func drainPingQueue(queue <-chan models.PingRecord, limit int) []models.PingReco
 		}
 	}
 	return records
+}
+
+func flushReportQueue(ctx context.Context, pending *[]v2.Report, queue <-chan v2.Report) error {
+	return flushReportQueueWithWriter(ctx, pending, queue, writePendingReports)
+}
+
+func flushReportQueueWithWriter(ctx context.Context, pending *[]v2.Report, queue <-chan v2.Report, write func(context.Context, *[]v2.Report) error) error {
+	if err := write(ctx, pending); err != nil {
+		return err
+	}
+	*pending = append(*pending, drainReportQueue(queue, reportBatchQueueSize)...)
+	return write(ctx, pending)
+}
+
+func flushPingQueue(ctx context.Context, pending *[]models.PingRecord, queue <-chan models.PingRecord) error {
+	return flushPingQueueWithWriter(ctx, pending, queue, writePendingPingRecords)
+}
+
+func flushPingQueueWithWriter(ctx context.Context, pending *[]models.PingRecord, queue <-chan models.PingRecord, write func(context.Context, *[]models.PingRecord) error) error {
+	if err := write(ctx, pending); err != nil {
+		return err
+	}
+	*pending = append(*pending, drainPingQueue(queue, reportBatchQueueSize)...)
+	return write(ctx, pending)
 }
 
 func writePendingReports(ctx context.Context, pending *[]v2.Report) error {
