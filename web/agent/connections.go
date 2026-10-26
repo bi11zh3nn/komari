@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -30,11 +31,7 @@ const recentReportRetention = time.Minute
 func GetConnectedClients() map[string]*connection.SafeConn {
 	mu.RLock()
 	defer mu.RUnlock()
-	clientsCopy := make(map[string]*connection.SafeConn)
-	for k, v := range connectedClients {
-		clientsCopy[k] = v
-	}
-	return clientsCopy
+	return maps.Clone(connectedClients)
 }
 
 func SetConnectedClients(uuid string, conn *connection.SafeConn) {
@@ -155,9 +152,6 @@ func GetLatestReport() map[string]*v2.Report {
 	defer mu.RUnlock()
 	reportCopy := make(map[string]*v2.Report)
 	for k, v := range latestReport {
-		if v == nil {
-			continue
-		}
 		item := *v
 		reportCopy[k] = &item
 	}

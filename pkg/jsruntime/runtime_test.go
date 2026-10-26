@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dop251/goja"
-	"github.com/dop251/goja_nodejs/require"
+	moe "github.com/Calcium-Ion/moejs"
+ e "github.com/Calcium-Ion/moejs/engine"
+ "github.com/komari-monitor/komari/pkg/jsruntime/native"
+	"github.com/komari-monitor/komari/pkg/jsruntime/require"
 )
 
 func TestNewReturnsRuntimeWithInjectedGlobals(t *testing.T) {
@@ -29,6 +31,8 @@ func TestNewReturnsRuntimeWithInjectedGlobals(t *testing.T) {
 				typeof console.warn === "function" &&
 				typeof fetch === "function" &&
 				typeof XMLHttpRequest === "function" &&
+				typeof URL === "function" &&
+				typeof URLSearchParams === "function" &&
 				typeof Promise === "function" &&
 				typeof require === "function" &&
 				typeof queueMicrotask === "function" &&
@@ -46,6 +50,25 @@ func TestNewReturnsRuntimeWithInjectedGlobals(t *testing.T) {
 
 	if err := runtime.Call("sendMessage"); err != nil {
 		t.Fatalf("injected globals are not ready: %v", err)
+	}
+}
+
+func TestURLSearchParamsGlobal(t *testing.T) {
+	runtime, err := New(`
+		function sendMessage() {
+			const params = new URLSearchParams();
+			params.set("chat_id", "-100 123");
+			params.set("text", "通知 & test");
+			return params.toString() === "chat_id=-100+123&text=%E9%80%9A%E7%9F%A5+%26+test";
+		}
+	`, Options{Console: io.Discard, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+
+	if err := runtime.Call("sendMessage"); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -304,9 +327,9 @@ func TestRequireConfigurationComposesWithBaseDir(t *testing.T) {
 		Console: io.Discard,
 		Timeout: time.Second,
 		ConfigureRequire: func(registry *require.Registry) {
-			registry.RegisterNativeModule("komari", func(vm *goja.Runtime, module *goja.Object) {
-				exports := module.Get("exports").ToObject(vm)
-				_ = exports.Set("version", "test")
+			registry.RegisterNativeModule("komari", func(vm *moe.Runtime, module *e.Object) {
+				exports := native.Object(vm,native.Get(vm,module,"exports"))
+				_ = native.Set(vm,exports,"version", "test")
 			})
 		},
 	})
@@ -331,9 +354,9 @@ func TestConfigureRequireCanOverrideNodeModule(t *testing.T) {
 		Console: io.Discard,
 		Timeout: time.Second,
 		ConfigureRequire: func(registry *require.Registry) {
-			registry.RegisterNativeModule("path", func(vm *goja.Runtime, module *goja.Object) {
-				exports := module.Get("exports").ToObject(vm)
-				_ = exports.Set("source", "custom")
+			registry.RegisterNativeModule("path", func(vm *moe.Runtime, module *e.Object) {
+				exports := native.Object(vm,native.Get(vm,module,"exports"))
+				_ = native.Set(vm,exports,"source", "custom")
 			})
 		},
 	})
@@ -516,9 +539,9 @@ func TestConfigureHostProvidesHostServicesAndModules(t *testing.T) {
 		Timeout: time.Second,
 		ConfigureHost: func(h *Host, registry *require.Registry) {
 			host = h
-			registry.RegisterNativeModule("server", func(vm *goja.Runtime, module *goja.Object) {
-				exports := module.Get("exports").ToObject(vm)
-				_ = exports.Set("name", "test-server")
+			registry.RegisterNativeModule("server", func(vm *moe.Runtime, module *e.Object) {
+				exports := native.Object(vm,native.Get(vm,module,"exports"))
+				_ = native.Set(vm,exports,"name", "test-server")
 			})
 		},
 	})
@@ -537,7 +560,7 @@ func TestConfigureHostProvidesHostServicesAndModules(t *testing.T) {
 	// Host services must be usable from another goroutine while the runtime
 	// is idle: queue a job and wait for it to run on the event loop.
 	ran := make(chan bool, 1)
-	if !host.RunOnLoop(func(vm *goja.Runtime) {
+	if !host.RunOnLoop(func(vm *moe.Runtime) {
 		ran <- true
 	}) {
 		t.Fatal("RunOnLoop rejected a job on an open runtime")

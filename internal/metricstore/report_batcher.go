@@ -39,6 +39,7 @@ var (
 const (
 	reportBatchInterval     = 3 * time.Second
 	reportBatchQueueSize    = 512
+	pingBatchQueueSize      = 4096
 	pingBatchMaxRecords     = 512
 	reportBatchWriteTimeout = 10 * time.Second
 	// Longer gaps have no reliable per-bucket traffic attribution.
@@ -81,7 +82,7 @@ func StartReportBatcher() {
 	}
 	worker := &reportBatchWorker{
 		queue:     make(chan v2.Report, reportBatchQueueSize),
-		pingQueue: make(chan models.PingRecord, reportBatchQueueSize),
+		pingQueue: make(chan models.PingRecord, pingBatchQueueSize),
 		requests:  make(chan reportBatchRequest, 1),
 		done:      make(chan struct{}),
 	}
@@ -253,50 +254,22 @@ func (w *reportBatchWorker) enqueuePing(ctx context.Context, record models.PingR
 	}
 }
 
-func drainReportQueue(queue <-chan v2.Report, limit int) []v2.Report {
-	if limit <= 0 {
+// drainQueue takes up to limit queued items without blocking.
+func drainQueue[T any](queue <-chan T, limit int) []T {
+	n := min(len(queue), limit)
+	if n <= 0 {
 		return nil
 	}
-	capacity := len(queue)
-	if capacity > limit {
-		capacity = limit
-	}
-	if capacity == 0 {
-		return nil
-	}
-	reports := make([]v2.Report, 0, capacity)
-	for len(reports) < limit {
+	items := make([]T, 0, n)
+	for len(items) < limit {
 		select {
-		case report := <-queue:
-			reports = append(reports, report)
+		case item := <-queue:
+			items = append(items, item)
 		default:
-			return reports
+			return items
 		}
 	}
-	return reports
-}
-
-func drainPingQueue(queue <-chan models.PingRecord, limit int) []models.PingRecord {
-	if limit <= 0 {
-		return nil
-	}
-	capacity := len(queue)
-	if capacity > limit {
-		capacity = limit
-	}
-	if capacity == 0 {
-		return nil
-	}
-	records := make([]models.PingRecord, 0, capacity)
-	for len(records) < limit {
-		select {
-		case record := <-queue:
-			records = append(records, record)
-		default:
-			return records
-		}
-	}
-	return records
+	return items
 }
 
 func flushReportQueue(ctx context.Context, pending *[]v2.Report, queue <-chan v2.Report) error {
@@ -307,7 +280,7 @@ func flushReportQueueWithWriter(ctx context.Context, pending *[]v2.Report, queue
 	if err := write(ctx, pending); err != nil {
 		return err
 	}
-	*pending = append(*pending, drainReportQueue(queue, reportBatchQueueSize)...)
+	*pending = append(*pending, drainQueue(queue, reportBatchQueueSize)...)
 	return write(ctx, pending)
 }
 
@@ -319,27 +292,22 @@ func flushPingQueueWithWriter(ctx context.Context, pending *[]models.PingRecord,
 	if err := write(ctx, pending); err != nil {
 		return err
 	}
-	*pending = append(*pending, drainPingQueue(queue, reportBatchQueueSize)...)
+	*pending = append(*pending, drainQueue(queue, pingBatchQueueSize)...)
 	return write(ctx, pending)
 }
 
+// writePendingReports commits all pending reports as one batch and keeps them
+// for the next attempt when the write fails.
 func writePendingReports(ctx context.Context, pending *[]v2.Report) error {
 	if len(*pending) == 0 {
 		return nil
 	}
-	batchSize := len(*pending)
-	for len(*pending) > 0 {
-		if batchSize > len(*pending) {
-			batchSize = len(*pending)
-		}
-		writeCtx, cancel := context.WithTimeout(ctx, reportBatchWriteTimeout)
-		_, err := writeReportBatch(writeCtx, (*pending)[:batchSize])
-		cancel()
-		if err != nil {
-			return err
-		}
-		*pending = (*pending)[batchSize:]
+	writeCtx, cancel := context.WithTimeout(ctx, reportBatchWriteTimeout)
+	defer cancel()
+	if _, err := writeReportBatch(writeCtx, *pending); err != nil {
+		return err
 	}
+	*pending = (*pending)[:0]
 	return nil
 }
 
@@ -393,7 +361,7 @@ func writeReportBatch(ctx context.Context, reports []v2.Report) ([]v2.Report, er
 			state.mu.Unlock()
 		}
 		if !values.initialized {
-			totalUp, hasUp, err := s.LatestBefore(ctx, MetricNetTotalUp, report.UUID, report.UpdatedAt)
+			totalUp, hasUp, err := latestReportPoint(ctx, s, MetricNetTotalUp, report.UUID, report.UpdatedAt)
 			if err != nil {
 				logger.Errorf("metricstore", "failed to restore previous upload counter for %s: %v", report.UUID, err)
 			} else {
@@ -401,7 +369,7 @@ func writeReportBatch(ctx context.Context, reports []v2.Report) ([]v2.Report, er
 				values.totalUpAt = totalUp.Timestamp
 				values.hasUp = hasUp
 			}
-			totalDown, hasDown, err := s.LatestBefore(ctx, MetricNetTotalDown, report.UUID, report.UpdatedAt)
+			totalDown, hasDown, err := latestReportPoint(ctx, s, MetricNetTotalDown, report.UUID, report.UpdatedAt)
 			if err != nil {
 				logger.Errorf("metricstore", "failed to restore previous download counter for %s: %v", report.UUID, err)
 			} else {

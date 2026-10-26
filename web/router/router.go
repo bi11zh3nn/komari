@@ -157,8 +157,6 @@ func registerAdminRoutes(r *gin.Engine) {
 		settings.POST("/", jsonRpc.Bind("admin:editSettings"))
 		settings.POST("/oidc", jsonRpc.Bind("admin:setOidcProvider"))
 		settings.GET("/oidc", jsonRpc.Bind("admin:getOidcProvider", jsonRpc.WithQuery("provider")))
-		settings.POST("/message-sender", jsonRpc.Bind("admin:setMessageSenderProvider"))
-		settings.GET("/message-sender", jsonRpc.Bind("admin:getMessageSenderProvider", jsonRpc.WithQuery("provider")))
 	}
 
 	// database storage inspection and maintenance
@@ -227,6 +225,9 @@ func registerAdminRoutes(r *gin.Engine) {
 	// notifications
 	notificationGroup := g.Group("/notification")
 	{
+		notificationGroup.GET("/channels", jsonRpc.Bind("admin:listNotificationChannels"))
+		notificationGroup.GET("/channel/configuration", jsonRpc.Bind("admin:getNotificationChannelConfiguration", jsonRpc.WithQuery("id")))
+		notificationGroup.POST("/channel/configuration", jsonRpc.Bind("admin:setNotificationChannelConfiguration"))
 		notificationGroup.GET("/offline", jsonRpc.Bind("admin:listOfflineNotifications"))
 		notificationGroup.POST("/offline/edit", jsonRpc.Bind("admin:editOfflineNotification"))
 		notificationGroup.POST("/offline/enable", jsonRpc.Bind("admin:enableOfflineNotification"))
